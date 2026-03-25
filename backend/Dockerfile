@@ -23,8 +23,8 @@ EXPOSE 3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost:3001/api/health || exit 1
+  CMD curl -f http://localhost:3001/api/health || exit 1
 
-# Run entrypoint script
-CMD ["/app/entrypoint.sh"]
+# Run data ingestion then start server
+CMD ["sh", "-c", "node src/loaders/ingest.js && npm start"]
 
