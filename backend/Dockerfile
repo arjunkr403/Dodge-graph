@@ -21,8 +21,8 @@ RUN chmod +x /app/entrypoint.sh
 # Expose port
 EXPOSE 3001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+# Health check - increase start-period to 120s to allow data ingestion to complete
+HEALTHCHECK --interval=30s --timeout=3s --start-period=120s --retries=3 \
   CMD curl -f http://localhost:3001/api/health || exit 1
 
 # Run data ingestion then start server

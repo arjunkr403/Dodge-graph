@@ -19,6 +19,22 @@ const num = v => (v === null || v === undefined || v === '') ? null : parseFloat
 const str = v => (v === null || v === undefined || v === '') ? null : String(v).trim() || null;
 const dat = v => (!v || v === 'null') ? null : v;
 
+// Wait for database to be ready with retry logic
+async function waitForDatabase() {
+  console.log('⏳ Waiting for database to be ready...');
+  for (let attempt = 1; attempt <= 30; attempt++) {
+    try {
+      await pool.query('SELECT 1');
+      console.log('✅ Database is ready');
+      return;
+    } catch (err) {
+      if (attempt === 30) throw err;
+      console.log(`   Attempt ${attempt}/30, retrying in 2s...`);
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+}
+
 async function procesBusinessPartner(r) {
   const id = r.businessPartner || r.customer;
   if (!id) return;
@@ -47,16 +63,16 @@ async function processProductDescription(r) {
     [str(r.productDescription), id]);
 }
 
-async function processProductPlant(r) {}
-async function processPlant(r) {}
-async function processCustomerCompany(r) {}
-async function processCustomerSalesArea(r) {}
+async function processProductPlant(r) { }
+async function processPlant(r) { }
+async function processCustomerCompany(r) { }
+async function processCustomerSalesArea(r) { }
 
 async function processDeliveryHeader(r) {
   const id = r.deliveryDocument; if (!id) return;
   await pool.query(`INSERT INTO deliveries(id,actual_delivery_date,planned_delivery_date,shipping_point,delivery_type,overall_status)
     VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
-    [id, dat(r.actualGoodsMovementDate), dat(r.creationDate), str(r.shippingPoint), str(r.deliveryType||'LF'), str(r.overallGoodsMovementStatus||r.hdrGeneralIncompletionStatus)]);
+    [id, dat(r.actualGoodsMovementDate), dat(r.creationDate), str(r.shippingPoint), str(r.deliveryType || 'LF'), str(r.overallGoodsMovementStatus || r.hdrGeneralIncompletionStatus)]);
 }
 
 async function processDeliveryItem(r) {
@@ -71,8 +87,8 @@ async function processDeliveryItem(r) {
   await pool.query(`INSERT INTO delivery_items(id,delivery_id,order_item_id,product_id,delivered_quantity,unit,plant,storage_location)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING`,
     [id, r.deliveryDocument,
-     r.referenceSdDocument && r.referenceSdDocumentItem ? `${r.referenceSdDocument}-${r.referenceSdDocumentItem}` : null,
-     str(r.material)||null, num(r.actualDeliveryQuantity), str(r.deliveryQuantityUnit), str(r.plant), str(r.storageLocation)]);
+      r.referenceSdDocument && r.referenceSdDocumentItem ? `${r.referenceSdDocument}-${r.referenceSdDocumentItem}` : null,
+      str(r.material) || null, num(r.actualDeliveryQuantity), str(r.deliveryQuantityUnit), str(r.plant), str(r.storageLocation)]);
 }
 
 async function processBillingHeader(r) {
@@ -81,7 +97,7 @@ async function processBillingHeader(r) {
   if (custId) await pool.query(`INSERT INTO customers(id) VALUES($1) ON CONFLICT DO NOTHING`, [custId]);
   await pool.query(`INSERT INTO billing_documents(id,customer_id,billing_date,net_amount,currency,billing_type,company_code,accounting_document)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING`,
-    [id, custId, dat(r.billingDocumentDate||r.creationDate), num(r.totalNetAmount), str(r.transactionCurrency), str(r.billingDocumentType), str(r.companyCode), str(r.accountingDocument)]);
+    [id, custId, dat(r.billingDocumentDate || r.creationDate), num(r.totalNetAmount), str(r.transactionCurrency), str(r.billingDocumentType), str(r.companyCode), str(r.accountingDocument)]);
 }
 
 async function processBillingItem(r) {
@@ -95,13 +111,13 @@ async function processBillingItem(r) {
   }
   await pool.query(`INSERT INTO billing_items(id,billing_doc_id,product_id,quantity,net_value,currency)
     VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
-    [id, r.billingDocument, str(r.material)||null, num(r.billingQuantity), num(r.netAmount), str(r.transactionCurrency)]);
+    [id, r.billingDocument, str(r.material) || null, num(r.billingQuantity), num(r.netAmount), str(r.transactionCurrency)]);
 }
 
-async function processBillingCancellation(r) {}
+async function processBillingCancellation(r) { }
 
 async function processJournalEntry(r) {
-  const id = `${r.accountingDocument}-${r.accountingDocumentItem||'1'}`;
+  const id = `${r.accountingDocument}-${r.accountingDocumentItem || '1'}`;
   if (!r.accountingDocument) return;
   const billingId = str(r.referenceDocument);
   if (billingId) await pool.query(`INSERT INTO billing_documents(id) VALUES($1) ON CONFLICT DO NOTHING`, [billingId]);
@@ -111,13 +127,13 @@ async function processJournalEntry(r) {
 }
 
 async function processPayment(r) {
-  const id = `${r.accountingDocument}-${r.accountingDocumentItem||'1'}`;
+  const id = `${r.accountingDocument}-${r.accountingDocumentItem || '1'}`;
   if (!r.accountingDocument) return;
   const custId = str(r.customer);
   if (custId) await pool.query(`INSERT INTO customers(id) VALUES($1) ON CONFLICT DO NOTHING`, [custId]);
   await pool.query(`INSERT INTO payments(id,customer_id,payment_date,amount,currency,clearing_document)
     VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
-    [id, custId, dat(r.postingDate||r.clearingDate), num(r.amountInTransactionCurrency), str(r.transactionCurrency), str(r.clearingAccountingDocument)]);
+    [id, custId, dat(r.postingDate || r.clearingDate), num(r.amountInTransactionCurrency), str(r.transactionCurrency), str(r.clearingAccountingDocument)]);
 }
 
 
@@ -134,7 +150,7 @@ async function processSalesOrderItem(r) {
   await pool.query(`INSERT INTO sales_orders(id) VALUES($1) ON CONFLICT DO NOTHING`, [r.salesOrder]);
   if (r.material) await pool.query(`INSERT INTO products(id) VALUES($1) ON CONFLICT DO NOTHING`, [r.material]);
   await pool.query(`INSERT INTO sales_order_items(id,order_id,product_id,item_number,quantity,unit,net_value,currency,plant,storage_location) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO NOTHING`,
-    [id, r.salesOrder, str(r.material)||null, str(r.salesOrderItem), num(r.requestedQuantity), str(r.requestedQuantityUnit), num(r.netAmount), str(r.transactionCurrency), str(r.productionPlant), str(r.storageLocation)]);
+    [id, r.salesOrder, str(r.material) || null, str(r.salesOrderItem), num(r.requestedQuantity), str(r.requestedQuantityUnit), num(r.netAmount), str(r.transactionCurrency), str(r.productionPlant), str(r.storageLocation)]);
 }
 
 const FOLDER_HANDLERS = {
@@ -159,7 +175,7 @@ const FOLDER_HANDLERS = {
 
 const PROCESS_ORDER = [
   'business_partners',
-  'business_partner_addresses', 
+  'business_partner_addresses',
   'products',
   'product_descriptions',
   'sales_order_headers',
@@ -184,23 +200,23 @@ async function processFile(filePath, handler, folderName) {
     const trimmed = line.trim();
     if (!trimmed) {
       if (buffer) {
-        try { const r = JSON.parse(buffer); buffer=''; await handler(r); count++; } catch(_) { buffer=''; errors++; }
+        try { const r = JSON.parse(buffer); buffer = ''; await handler(r); count++; } catch (_) { buffer = ''; errors++; }
       }
       continue;
     }
     buffer += trimmed;
-    try { const r = JSON.parse(buffer); buffer=''; await handler(r); count++; } catch(e) {
-      if (!(e instanceof SyntaxError)) { buffer=''; errors++; if(errors<=3) console.error(`  ⚠ ${e.message}`); }
+    try { const r = JSON.parse(buffer); buffer = ''; await handler(r); count++; } catch (e) {
+      if (!(e instanceof SyntaxError)) { buffer = ''; errors++; if (errors <= 3) console.error(`  ⚠ ${e.message}`); }
     }
   }
-  if (buffer.trim()) { try { await handler(JSON.parse(buffer)); count++; } catch(_) {} }
+  if (buffer.trim()) { try { await handler(JSON.parse(buffer)); count++; } catch (_) { } }
   return { count, errors };
 }
 
 async function initSchema() {
   const sql = fs.readFileSync(path.join(__dirname, '../config/schema.sql'), 'utf8');
   await pool.query(sql);
-  
+
   // Add accounting_document column to billing_documents if not exists
   await pool.query(`ALTER TABLE billing_documents ADD COLUMN IF NOT EXISTS accounting_document TEXT`);
   console.log('✅ Schema initialized');
@@ -208,6 +224,7 @@ async function initSchema() {
 
 async function main() {
   console.log('🚀 Starting SAP O2C data ingestion...\n');
+  await waitForDatabase();
   await initSchema();
 
   let baseDir = DATA_DIR;
@@ -235,7 +252,7 @@ async function main() {
   }
 
   console.log('\n📊 Final counts:');
-  for (const t of ['customers','products','sales_orders','deliveries','billing_documents','journal_entries','payments']) {
+  for (const t of ['customers', 'products', 'sales_orders', 'deliveries', 'billing_documents', 'journal_entries', 'payments']) {
     const r = await pool.query(`SELECT COUNT(*) FROM ${t}`);
     console.log(`   ${t}: ${r.rows[0].count}`);
   }
