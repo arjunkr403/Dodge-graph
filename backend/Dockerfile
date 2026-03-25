@@ -2,8 +2,8 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install netcat for database readiness check
-RUN apk add --no-cache netcat-openbsd
+# Install netcat and curl for database readiness check and health checks
+RUN apk add --no-cache netcat-openbsd curl
 
 # Copy package files
 COPY package.json package-lock.json ./
