@@ -15,27 +15,68 @@ const MODEL = 'llama-3.3-70b-versatile';
 
 // ── Full schema definition for the SQL generator prompt ────────────────────
 const SCHEMA_DEFINITION = `
-Database: PostgreSQL — Order-to-Cash ERP system (SAP-like data)
+Database: PostgreSQL — SAP Order-to-Cash ERP system (real production data, company code: ABCD, currency: INR)
 
-Tables and columns:
+Tables and columns (all column names are snake_case):
 
 customers(id TEXT PK, name TEXT, country TEXT, region TEXT, city TEXT, postal_code TEXT, street TEXT)
-products(id TEXT PK, description TEXT, category TEXT, unit TEXT)
-sales_orders(id TEXT PK, customer_id TEXT FK→customers, order_date DATE, delivery_date DATE, status TEXT, sales_org TEXT, distribution_channel TEXT, division TEXT, total_net_value NUMERIC, currency TEXT)
-sales_order_items(id TEXT PK, order_id TEXT FK→sales_orders, product_id TEXT FK→products, item_number TEXT, quantity NUMERIC, unit TEXT, net_value NUMERIC, net_price NUMERIC, currency TEXT, plant TEXT, storage_location TEXT)
-deliveries(id TEXT PK, order_id TEXT FK→sales_orders, customer_id TEXT FK→customers, actual_delivery_date DATE, planned_delivery_date DATE, ship_to_party TEXT, shipping_point TEXT, plant TEXT, delivery_type TEXT, overall_status TEXT)
-delivery_items(id TEXT PK, delivery_id TEXT FK→deliveries, order_item_id TEXT, product_id TEXT FK→products, delivered_quantity NUMERIC, unit TEXT, plant TEXT, storage_location TEXT)
-billing_documents(id TEXT PK, order_id TEXT FK→sales_orders, delivery_id TEXT FK→deliveries, customer_id TEXT FK→customers, billing_date DATE, net_amount NUMERIC, tax_amount NUMERIC, currency TEXT, billing_type TEXT, company_code TEXT)
-billing_items(id TEXT PK, billing_doc_id TEXT FK→billing_documents, product_id TEXT FK→products, quantity NUMERIC, net_value NUMERIC, currency TEXT, plant TEXT)
-journal_entries(id TEXT PK, billing_doc_id TEXT FK→billing_documents, company_code TEXT, fiscal_year TEXT, gl_account TEXT, reference_document TEXT, cost_center TEXT, profit_center TEXT, transaction_currency TEXT, amount_in_transaction_currency NUMERIC, company_code_currency TEXT, amount_in_company_code_currency NUMERIC, posting_date DATE, document_date DATE, accounting_document_type TEXT, accounting_document_item TEXT)
-payments(id TEXT PK, billing_doc_id TEXT FK→billing_documents, customer_id TEXT FK→customers, payment_date DATE, amount NUMERIC, currency TEXT, payment_method TEXT, clearing_document TEXT)
+  -- id = businessPartner / customer number e.g. '310000108', '320000083'
 
-Key relationships:
-- Customer → places → Sales Order → has → Sales Order Items → reference → Products
-- Sales Order → fulfilled_by → Delivery → invoiced_from → Billing Document
-- Billing Document → posted_to → Journal Entry (accounting_document_type='RV' means billing, 'DZ' means payment)
-- Billing Document → cleared_by → Payment
-- journal_entries.reference_document links back to billing_documents.id
+products(id TEXT PK, description TEXT, category TEXT, unit TEXT)
+  -- id = product/material number e.g. '3001456', 'B8907367002246'
+  -- description = human-readable product name e.g. 'WB-CG CHARCOAL GANG'
+  -- category = productGroup e.g. 'ZPKG004', 'ZFG1001'
+
+sales_orders(id TEXT PK, customer_id TEXT FK→customers, order_date DATE, status TEXT, currency TEXT)
+  -- id = salesDocument/referenceSdDocument e.g. '740556'
+  -- NOTE: sales_orders are stubs created from delivery/billing references; most fields may be null
+
+deliveries(id TEXT PK, order_id TEXT FK→sales_orders, actual_delivery_date DATE, planned_delivery_date DATE, shipping_point TEXT, delivery_type TEXT, overall_status TEXT)
+  -- id = deliveryDocument e.g. '80737721', '80738076'
+  -- overall_status: 'A'=not started, 'B'=partial, 'C'=complete
+
+delivery_items(id TEXT PK, delivery_id TEXT FK→deliveries, order_item_id TEXT, product_id TEXT FK→products, delivered_quantity NUMERIC, unit TEXT, plant TEXT, storage_location TEXT)
+  -- id = 'deliveryDocument-deliveryDocumentItem' e.g. '80737721-000010'
+
+billing_documents(id TEXT PK, delivery_id TEXT FK→deliveries, customer_id TEXT FK→customers, billing_date DATE, net_amount NUMERIC, currency TEXT, billing_type TEXT, company_code TEXT, accounting_document TEXT)
+  -- id = billingDocument e.g. '90504248', '90628265'
+  -- billing_type: 'F2'=standard invoice, 'S1'=cancellation
+  -- accounting_document links to journal_entries (e.g. '9400000249')
+  -- net_amount is in INR
+
+billing_items(id TEXT PK, billing_doc_id TEXT FK→billing_documents, product_id TEXT FK→products, quantity NUMERIC, net_value NUMERIC, currency TEXT)
+  -- id = 'billingDocument-billingDocumentItem'
+
+journal_entries(id TEXT PK, billing_doc_id TEXT FK→billing_documents, company_code TEXT, fiscal_year TEXT, gl_account TEXT, reference_document TEXT, profit_center TEXT, transaction_currency TEXT, amount_in_transaction_currency NUMERIC, company_code_currency TEXT, amount_in_company_code_currency NUMERIC, posting_date DATE, document_date DATE, accounting_document_type TEXT, accounting_document_item TEXT)
+  -- id = 'accountingDocument-accountingDocumentItem' e.g. '9400000249-1'
+  -- reference_document = billingDocument id (FK back to billing_documents.id)
+  -- accounting_document_type: 'RV'=billing invoice, 'DZ'=incoming payment
+  -- gl_account: '15500020' = accounts receivable
+
+payments(id TEXT PK, customer_id TEXT FK→customers, payment_date DATE, amount NUMERIC, currency TEXT, clearing_document TEXT)
+  -- id = 'accountingDocument-accountingDocumentItem'
+  -- clearing_document = the accounting document that cleared this payment
+  -- amount may be negative (credit) or positive (debit)
+
+Key relationships and how to JOIN:
+1. Delivery → Billing: billing_documents.delivery_id = deliveries.id
+2. Billing → Journal Entry: journal_entries.reference_document = billing_documents.id
+3. Billing → Journal (alt): journal_entries.billing_doc_id = billing_documents.id
+4. Customer → Billing: billing_documents.customer_id = customers.id
+5. Customer → Payment: payments.customer_id = customers.id
+6. Billing Item → Product: billing_items.product_id = products.id
+7. Delivery Item → Product: delivery_items.product_id = products.id
+
+Flow trace query pattern (Delivery → Billing → Journal Entry):
+  SELECT d.id as delivery, bd.id as billing_doc, bd.net_amount, je.id as journal_entry, je.amount_in_transaction_currency
+  FROM deliveries d
+  LEFT JOIN billing_documents bd ON bd.delivery_id = d.id
+  LEFT JOIN journal_entries je ON je.reference_document = bd.id
+  WHERE d.id = '<id>'
+
+Incomplete flow detection:
+  -- Delivered but not billed: LEFT JOIN billing_documents ON delivery_id, WHERE billing_documents.id IS NULL
+  -- Billed but no journal entry: LEFT JOIN journal_entries ON reference_document, WHERE journal_entries.id IS NULL
 `;
 
 // ── Stage 1: Guardrail classifier ──────────────────────────────────────────
@@ -62,21 +103,24 @@ Respond with ONLY one word: RELEVANT or IRRELEVANT`;
 
 // ── Stage 2: SQL generator ─────────────────────────────────────────────────
 export async function generateSQL(userQuestion, conversationHistory = []) {
-  const systemPrompt = `You are an expert PostgreSQL query generator for an SAP-like Order-to-Cash ERP system.
+  const systemPrompt = `You are an expert PostgreSQL query generator for a real SAP Order-to-Cash ERP system.
 
 ${SCHEMA_DEFINITION}
 
 Rules you MUST follow:
 1. Return ONLY valid PostgreSQL SQL. No markdown, no code fences, no explanation, no preamble.
 2. Never use INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE or any data-modifying statement.
-3. Always add LIMIT 100 unless the query is an aggregate (COUNT, SUM, AVG, etc.).
-4. For "trace the full flow" queries, JOIN: sales_orders → deliveries → billing_documents → journal_entries.
-5. For incomplete flows, use LEFT JOINs and filter WHERE the right-side id IS NULL.
-6. If the question references a specific ID (like a billing document number), use WHERE id = 'that_number' or WHERE reference_document = 'that_number'.
-7. Use lowercase table/column names exactly as defined above.
-8. If the question cannot be answered with the available schema, return exactly: CANNOT_ANSWER
-9. Cast dates to ::text when selecting them to avoid serialization issues.
-10. For "which products have most billing documents", JOIN billing_items → products, GROUP BY product, ORDER BY COUNT DESC.`;
+3. Always add LIMIT 100 unless the query is a pure aggregate (COUNT, SUM, AVG, MAX, MIN).
+4. Column names are always snake_case (e.g. net_amount, billing_date, reference_document).
+5. For "trace full flow" of a billing document: JOIN deliveries ON billing_documents.delivery_id = deliveries.id, then JOIN journal_entries ON journal_entries.reference_document = billing_documents.id.
+6. For incomplete flows: use LEFT JOIN and filter WHERE the right-side id IS NULL.
+7. For product-level analysis: JOIN billing_items ON billing_doc_id, then JOIN products ON product_id.
+8. When referencing a specific ID the user provides, use WHERE id = 'that_id' or WHERE reference_document = 'that_id'.
+9. Cast date columns to ::text when selecting (e.g. billing_date::text) to avoid serialization issues.
+10. The main join between billing and journal: journal_entries.reference_document = billing_documents.id.
+11. If a question cannot be answered with the schema, return exactly: CANNOT_ANSWER
+12. For "total amount" queries always SUM(net_amount) or SUM(amount_in_transaction_currency) and include currency.
+13. Do not reference tables or columns that don't exist in the schema above.`;
 
   const messages = [
     ...conversationHistory.slice(-4).map(h => ({ role: h.role, content: h.content })),

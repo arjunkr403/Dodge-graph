@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS billing_documents (
   currency TEXT,
   billing_type TEXT,
   company_code TEXT,
+  accounting_document TEXT,        -- links to journal_entries.id prefix
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

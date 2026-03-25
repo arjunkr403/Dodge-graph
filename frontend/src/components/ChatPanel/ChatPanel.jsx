@@ -1,7 +1,22 @@
 import { useState, useRef, useEffect } from 'react';
 
+// Prewritten queries shown as chips — always visible on first load
+const PREWRITTEN_QUERIES = [
+  "Which billing documents have the highest net amount?",
+  "Trace the full flow of billing document 90504248",
+  "Show deliveries with no billing document",
+  "What is the total billed amount per customer?",
+  "Which products appear in the most billing items?",
+  "Show all journal entries posted in April 2025",
+  "List all customers with their total payment amount",
+  "Show payments received for customer 320000083",
+  "Find billing documents without a journal entry",
+  "What is the average billing amount across all documents?",
+  "Show top 5 products by total billed quantity",
+  "Which company codes are present in the dataset?",
+];
+
 function formatMarkdown(text) {
-  // Bold **text**
   return text
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br/>');
@@ -22,7 +37,7 @@ function SqlBlock({ sql }) {
         }}
       >
         <span style={{ fontSize: 9 }}>{open ? '▼' : '▶'}</span>
-        {open ? 'Hide SQL' : 'Show SQL'}
+        {open ? 'Hide SQL' : 'View generated SQL'}
       </button>
       {open && (
         <pre style={{
@@ -57,7 +72,7 @@ function DataTable({ rows, rowCount }) {
         }}
       >
         <span style={{ fontSize: 9 }}>{open ? '▼' : '▶'}</span>
-        {open ? 'Hide' : 'View'} {rowCount} rows
+        {open ? 'Hide' : 'View'} {rowCount} row{rowCount !== 1 ? 's' : ''}
       </button>
       {open && (
         <div style={{ marginTop: 8, overflowX: 'auto' }}>
@@ -68,8 +83,7 @@ function DataTable({ rows, rowCount }) {
                   <th key={c} style={{
                     padding: '5px 8px', textAlign: 'left',
                     borderBottom: '1px solid rgba(255,255,255,0.08)',
-                    color: 'rgba(255,255,255,0.4)', fontWeight: 500,
-                    whiteSpace: 'nowrap',
+                    color: 'rgba(255,255,255,0.4)', fontWeight: 500, whiteSpace: 'nowrap',
                   }}>{c}</th>
                 ))}
               </tr>
@@ -126,9 +140,7 @@ function Message({ msg }) {
           border: `1px solid ${isUser ? 'rgba(127,119,221,0.3)' : 'rgba(255,255,255,0.06)'}`,
           borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
           color: msg.isError ? '#D85A30' : 'rgba(255,255,255,0.85)',
-          fontSize: 13,
-          fontFamily: 'DM Sans',
-          lineHeight: 1.6,
+          fontSize: 13, fontFamily: 'DM Sans', lineHeight: 1.6,
         }}
           dangerouslySetInnerHTML={{ __html: formatMarkdown(msg.content) }}
         />
@@ -169,27 +181,69 @@ function TypingIndicator() {
   );
 }
 
-export default function ChatPanel({ messages, loading, onSend, suggestions, onLoadSuggestions, isMinimized, onToggleMinimize }) {
+// Prewritten query chips — always visible before first message
+function QueryChips({ onSelect }) {
+  return (
+    <div style={{ padding: '8px 12px 0' }}>
+      <div style={{
+        fontSize: 10, color: 'rgba(255,255,255,0.25)',
+        letterSpacing: '0.08em', marginBottom: 8,
+        fontFamily: 'DM Sans', textTransform: 'uppercase',
+      }}>
+        Try asking
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {PREWRITTEN_QUERIES.map((q, i) => (
+          <button
+            key={i}
+            onClick={() => onSelect(q)}
+            style={{
+              background: 'rgba(127,119,221,0.06)',
+              border: '1px solid rgba(127,119,221,0.15)',
+              borderRadius: 8,
+              padding: '7px 11px',
+              color: 'rgba(255,255,255,0.6)',
+              fontSize: 12,
+              fontFamily: 'DM Sans',
+              textAlign: 'left',
+              cursor: 'pointer',
+              lineHeight: 1.4,
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'rgba(127,119,221,0.14)';
+              e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
+              e.currentTarget.style.borderColor = 'rgba(127,119,221,0.35)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'rgba(127,119,221,0.06)';
+              e.currentTarget.style.color = 'rgba(255,255,255,0.6)';
+              e.currentTarget.style.borderColor = 'rgba(127,119,221,0.15)';
+            }}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function ChatPanel({ messages, loading, onSend, onToggleMinimize }) {
   const [input, setInput] = useState('');
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  // Show chips until user sends first message
+  const hasUserMessage = messages.some(m => m.role === 'user');
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  useEffect(() => {
-    if (showSuggestions && suggestions.length === 0) {
-      onLoadSuggestions();
-    }
-  }, [showSuggestions]);
-
   const handleSubmit = () => {
     const msg = input.trim();
     if (!msg || loading) return;
     setInput('');
-    setShowSuggestions(false);
     onSend(msg);
   };
 
@@ -197,22 +251,11 @@ export default function ChatPanel({ messages, loading, onSend, suggestions, onLo
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
   };
 
-  if (isMinimized) {
-    return (
-      <div
-        onClick={onToggleMinimize}
-        style={{
-          position: 'absolute', bottom: 20, right: 20,
-          width: 52, height: 52, borderRadius: '50%',
-          background: 'linear-gradient(135deg, #7F77DD, #1D9E75)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', fontSize: 20, boxShadow: '0 4px 20px rgba(127,119,221,0.4)',
-          zIndex: 200,
-        }}
-        title="Open chat"
-      >💬</div>
-    );
-  }
+  // Send immediately on chip click — no need to fill input first
+  const handleChipClick = (query) => {
+    if (loading) return;
+    onSend(query);
+  };
 
   return (
     <div style={{
@@ -225,77 +268,43 @@ export default function ChatPanel({ messages, loading, onSend, suggestions, onLo
       <div style={{
         padding: '14px 18px', borderBottom: '1px solid rgba(255,255,255,0.06)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexShrink: 0,
       }}>
         <div>
-          <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginBottom: 2, letterSpacing: '0.05em' }}>CHAT WITH GRAPH</div>
+          <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, marginBottom: 2, letterSpacing: '0.05em' }}>CHAT WITH GRAPH</div>
           <div style={{ color: '#fff', fontSize: 14, fontWeight: 500 }}>Order to Cash</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#1D9E75', boxShadow: '0 0 6px #1D9E75' }} />
             <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11 }}>Live</span>
           </div>
           <button
             onClick={onToggleMinimize}
-            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: 16, padding: 2 }}
+            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: 18, padding: 2, lineHeight: 1 }}
             title="Minimize"
           >⊖</button>
         </div>
       </div>
 
-      {/* Messages */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px 12px' }}>
+      {/* Messages + Chips area */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '12px 12px 0' }}>
         {messages.map(msg => <Message key={msg.id} msg={msg} />)}
         {loading && <TypingIndicator />}
         <div ref={messagesEndRef} />
+
+        {/* Show prewritten chips when no user messages yet */}
+        {!hasUserMessage && !loading && <QueryChips onSelect={handleChipClick} />}
       </div>
 
-      {/* Suggestions */}
-      {showSuggestions && suggestions.length > 0 && (
-        <div style={{
-          maxHeight: 180, overflowY: 'auto',
-          borderTop: '1px solid rgba(255,255,255,0.06)',
-          padding: '8px 12px',
-        }}>
-          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginBottom: 6, letterSpacing: '0.05em' }}>EXAMPLE QUERIES</div>
-          {suggestions.map((s, i) => (
-            <div
-              key={i}
-              onClick={() => { setInput(s); setShowSuggestions(false); inputRef.current?.focus(); }}
-              style={{
-                padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                color: 'rgba(255,255,255,0.6)', fontSize: 12, lineHeight: 1.4,
-                transition: 'background 0.1s',
-                marginBottom: 2,
-              }}
-              onMouseEnter={e => e.target.style.background = 'rgba(127,119,221,0.12)'}
-              onMouseLeave={e => e.target.style.background = 'transparent'}
-            >{s}</div>
-          ))}
-        </div>
-      )}
-
       {/* Input */}
-      <div style={{ padding: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+      <div style={{ padding: '12px', borderTop: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
         <div style={{
           display: 'flex', gap: 8, alignItems: 'flex-end',
           background: 'rgba(255,255,255,0.04)',
           border: '1px solid rgba(255,255,255,0.1)',
           borderRadius: 10, padding: '8px 10px',
-          transition: 'border-color 0.15s',
-        }}
-          onFocus={e => e.currentTarget.style.borderColor = 'rgba(127,119,221,0.4)'}
-          onBlur={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'}
-        >
-          <button
-            onClick={() => setShowSuggestions(o => !o)}
-            title="Show example queries"
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: showSuggestions ? 'rgba(127,119,221,0.8)' : 'rgba(255,255,255,0.25)',
-              fontSize: 16, padding: '2px 0', lineHeight: 1, flexShrink: 0,
-            }}
-          >⚡</button>
+        }}>
           <textarea
             ref={inputRef}
             value={input}

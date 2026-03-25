@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { fetchGraph, expandNode as expandNodeAPI } from '../api/index.js';
 
 export function useGraph() {
-  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [meta, setMeta] = useState(null);
-  const [highlightNodes, setHighlightNodes] = useState(new Set());
+  const [graphData,    setGraphData]    = useState({ nodes: [], links: [] });
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState(null);
+  const [meta,         setMeta]         = useState(null);
+  const [highlightNodes, setHighlight]  = useState(new Set());
 
   const loadGraph = useCallback(async () => {
     setLoading(true);
@@ -28,13 +28,24 @@ export function useGraph() {
     try {
       const { nodes: newNodes, links: newLinks } = await expandNodeAPI(nodeId, nodeType);
       setGraphData(prev => {
-        const existingIds = new Set(prev.nodes.map(n => n.id));
-        const existingLinks = new Set(prev.links.map(l => `${l.source}-${l.target}`));
-        const filtered = newNodes.filter(n => !existingIds.has(n.id));
-        const filteredLinks = newLinks.filter(l => !existingLinks.has(`${l.source}-${l.target}`));
+        // After force-graph processes links, source/target become objects — normalize both cases
+        const existingNodeIds = new Set(prev.nodes.map(n => n.id));
+        const existingLinkKeys = new Set(prev.links.map(l => {
+          const s = typeof l.source === 'object' ? l.source.id : l.source;
+          const t = typeof l.target === 'object' ? l.target.id : l.target;
+          return `${s}→${t}`;
+        }));
+
+        const addNodes = newNodes.filter(n => !existingNodeIds.has(n.id));
+        const addLinks = newLinks.filter(l => {
+          const s = typeof l.source === 'object' ? l.source.id : l.source;
+          const t = typeof l.target === 'object' ? l.target.id : l.target;
+          return !existingLinkKeys.has(`${s}→${t}`);
+        });
+
         return {
-          nodes: [...prev.nodes, ...filtered],
-          links: [...prev.links, ...filteredLinks],
+          nodes: [...prev.nodes, ...addNodes],
+          links: [...prev.links, ...addLinks],
         };
       });
     } catch (err) {
@@ -42,11 +53,10 @@ export function useGraph() {
     }
   }, []);
 
-  // Highlight nodes by their IDs (called from chat responses)
   const highlightByIds = useCallback((ids) => {
-    setHighlightNodes(new Set(ids));
-    setTimeout(() => setHighlightNodes(new Set()), 4000);
+    setHighlight(new Set(ids));
+    setTimeout(() => setHighlight(new Set()), 4000);
   }, []);
 
-  return { graphData, loading, error, meta, loadGraph, expandNode, highlightNodes, highlightByIds };
+  return { graphData, loading, error, meta, loadGraph, expandNode, highlightNodes: highlightNodes, highlightByIds };
 }

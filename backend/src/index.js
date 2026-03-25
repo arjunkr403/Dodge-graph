@@ -20,7 +20,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/graph', graphRoutes);
 app.use('/api/chat', chatRoutes);
 
-app.listen(PORT, () => {
+app.listen(PORT,"0.0.0.0",() => {
   console.log(` Dodge Graph API running on http://localhost:${PORT}`);
   console.log(`   Graph: http://localhost:${PORT}/api/graph`);
   console.log(`   Chat:  http://localhost:${PORT}/api/chat`);

@@ -1,5 +1,5 @@
 import express from 'express';
-import pool from '../config/db.js';
+import pool, { poolConnected, lastConnectionError } from '../config/db.js';
 import { classifyQuery, generateSQL, synthesizeAnswer, synthesizeAnswerStream } from '../llm/llmClient.js';
 
 const router = express.Router();
@@ -13,6 +13,13 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    if (!poolConnected) {
+      return res.status(503).json({
+        error: 'Database connection unavailable',
+        detail: lastConnectionError?.message || 'PostgreSQL is not running or unreachable',
+      });
+    }
+
     // ── Stage 1: Guardrail ──────────────────────────────────
     const isRelevant = await classifyQuery(message);
     if (!isRelevant) {
@@ -83,6 +90,14 @@ router.post('/stream', async (req, res) => {
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
   try {
+    if (!poolConnected) {
+      send('error', {
+        message: lastConnectionError?.message || 'Database connection unavailable'
+      });
+      res.end();
+      return;
+    }
+
     const isRelevant = await classifyQuery(message);
     if (!isRelevant) {
       send('blocked', { message: "This system is designed to answer questions related to the Order-to-Cash ERP dataset only." });
@@ -126,19 +141,24 @@ router.post('/stream', async (req, res) => {
   }
 });
 
-// GET /api/chat/suggestions — example queries for the UI
+// GET /api/chat/suggestions — prewritten queries grounded in actual dataset
 router.get('/suggestions', (req, res) => {
   res.json([
-    "Which products are associated with the highest number of billing documents?",
-    "Trace the full flow of billing document 91150187",
-    "Show sales orders that were delivered but never billed",
+    "Which billing documents have the highest net amount?",
+    "Trace the full flow of billing document 90504248",
+    "Show all deliveries that have no billing document",
     "What is the total billed amount per customer?",
-    "Which deliveries have no corresponding billing document?",
-    "Show me all journal entries for billing document 91150187",
-    "Which sales orders have the highest net value?",
-    "List payments received in the last fiscal year",
-    "What are the top 10 products by quantity ordered?",
-    "Show sales orders billed without a delivery",
+    "Which products appear in the most billing items?",
+    "Show all journal entries posted in April 2025",
+    "List all customers with their total payment amount",
+    "Which deliveries are linked to sales order 740556?",
+    "Show all payments received for customer 320000083",
+    "Find billing documents without a corresponding journal entry",
+    "What is the average billing amount across all documents?",
+    "Show the top 5 products by total billed quantity",
+    "List all billing documents of type F2",
+    "Which company codes are present in the dataset?",
+    "Show journal entries with the largest transaction amounts",
   ]);
 });
 
